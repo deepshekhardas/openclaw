@@ -114,6 +114,16 @@ export function filterChannelInboundSupplementalContext(params: {
   };
 }
 
+export function filterChannelInboundQuoteContext(
+  contextVisibility: ContextVisibilityMode | undefined,
+  quote: SupplementalContextFacts["quote"] | undefined,
+): SupplementalContextFacts["quote"] | undefined {
+  return filterChannelInboundSupplementalContext({
+    contextVisibility,
+    supplemental: quote ? { quote } : undefined,
+  })?.quote;
+}
+
 function resolveAccessFactsCommandAuthorized(access: AccessFacts | undefined): boolean | undefined {
   const commands = access?.commands;
   return typeof commands?.authorized === "boolean"
@@ -178,25 +188,14 @@ export function buildChannelInboundEventContext(
     ModelParentSessionKey: params.route.modelParentSessionKey,
     MessageSid: params.messageId,
     MessageSidFull: params.messageIdFull,
+    SupplementalContext: supplemental,
     ReplyToId: params.reply.replyToId ?? supplemental?.quote?.id,
     ReplyToIdFull: params.reply.replyToIdFull ?? supplemental?.quote?.fullId,
-    ReplyToBody: supplemental?.quote?.body,
-    ReplyToSender: supplemental?.quote?.sender,
-    ReplyToIsQuote: supplemental?.quote?.isQuote,
-    ForwardedFrom: supplemental?.forwarded?.from,
-    ForwardedFromType: supplemental?.forwarded?.fromType,
-    ForwardedFromId: supplemental?.forwarded?.fromId,
-    ForwardedDate: supplemental?.forwarded?.date,
-    ThreadStarterBody: supplemental?.thread?.starterBody,
-    ThreadHistoryBody: supplemental?.thread?.historyBody,
-    ThreadLabel: supplemental?.thread?.label,
     ...mediaPayload,
     ChatType: params.conversation.kind,
     ConversationLabel: params.conversation.label,
     GroupSubject: params.conversation.kind !== "direct" ? params.conversation.label : undefined,
     GroupSpace: params.conversation.spaceId,
-    GroupSystemPrompt: supplemental?.groupSystemPrompt,
-    UntrustedStructuredContext: supplemental?.untrustedContext,
     SenderName: params.sender.name ?? params.sender.displayLabel,
     SenderId: params.sender.id,
     SenderUsername: params.sender.username,

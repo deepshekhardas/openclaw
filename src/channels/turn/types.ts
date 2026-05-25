@@ -7,7 +7,11 @@ import type { HistoryEntry, HistoryMediaEntry } from "../../auto-reply/reply/his
 import type { DispatchReplyWithBufferedBlockDispatcher } from "../../auto-reply/reply/provider-dispatcher.types.js";
 import type { ReplyDispatcherWithTypingOptions } from "../../auto-reply/reply/reply-dispatcher.js";
 import type { ReplyDispatchKind } from "../../auto-reply/reply/reply-dispatcher.types.js";
-import type { FinalizedMsgContext, MsgContext } from "../../auto-reply/templating.js";
+import type {
+  FinalizedMsgContext,
+  MsgContext,
+  SupplementalContextFacts,
+} from "../../auto-reply/templating.js";
 import type { GroupKeyResolution } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type {
@@ -22,6 +26,7 @@ import type { InboundLastRouteUpdate, RecordInboundSession } from "../session.ty
 import type { ChannelBotLoopProtectionFacts } from "./bot-loop-protection.js";
 
 export type { InboundEventKind } from "../inbound-event/kind.js";
+export type { SupplementalContextFacts };
 
 export type ChannelTurnAdmission =
   | { kind: "dispatch"; reason?: string }
@@ -194,36 +199,6 @@ export type CommandFacts = {
   body?: string;
   name?: string;
   authorized?: boolean;
-};
-
-export type SupplementalContextFacts = {
-  quote?: {
-    id?: string;
-    fullId?: string;
-    body?: string;
-    sender?: string;
-    senderAllowed?: boolean;
-    isExternal?: boolean;
-    isQuote?: boolean;
-  };
-  forwarded?: {
-    from?: string;
-    fromType?: string;
-    fromId?: string;
-    date?: number;
-    senderAllowed?: boolean;
-  };
-  thread?: {
-    id?: string;
-    starterBody?: string;
-    historyBody?: string;
-    label?: string;
-    parentSessionKey?: string;
-    modelParentSessionKey?: string;
-    senderAllowed?: boolean;
-  };
-  untrustedContext?: Array<{ label: string; source?: string; type?: string; payload: unknown }>;
-  groupSystemPrompt?: string;
 };
 
 export type InboundMediaFacts = {
