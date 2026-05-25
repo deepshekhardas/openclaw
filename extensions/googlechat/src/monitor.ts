@@ -279,7 +279,7 @@ async function processMessageWithPipeline(params: {
     body: rawBody,
   });
 
-  const ctxPayload = core.channel.turn.buildContext({
+  const ctxPayload = await core.channel.turn.buildContext({
     channel: "googlechat",
     accountId: route.accountId,
     messageId: message.name,

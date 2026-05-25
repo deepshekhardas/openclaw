@@ -261,7 +261,7 @@ export function createPluginRuntimeMock(overrides: DeepPartial<PluginRuntime> = 
     },
   ) as unknown as PluginRuntime["channel"]["turn"]["run"];
   const buildChannelInboundEventContextMock = vi.fn(
-    (params: Parameters<PluginRuntime["channel"]["turn"]["buildContext"]>[0]) =>
+    async (params: Parameters<PluginRuntime["channel"]["turn"]["buildContext"]>[0]) =>
       ({
         Body: params.message.body ?? params.message.rawBody,
         BodyForAgent: params.message.bodyForAgent ?? params.message.rawBody,
@@ -297,7 +297,7 @@ export function createPluginRuntimeMock(overrides: DeepPartial<PluginRuntime> = 
             false)
           : false,
         ...params.extra,
-      }) as ReturnType<PluginRuntime["channel"]["turn"]["buildContext"]>,
+      }) as Awaited<ReturnType<PluginRuntime["channel"]["turn"]["buildContext"]>>,
   ) as unknown as PluginRuntime["channel"]["turn"]["buildContext"];
   const base: PluginRuntime = {
     version: "1.0.0-test",

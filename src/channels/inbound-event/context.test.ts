@@ -35,8 +35,8 @@ function createBaseContextParams(
 }
 
 describe("buildChannelInboundEventContext", () => {
-  it("maps normalized inbound facts into a finalized message context", () => {
-    const ctx = buildChannelInboundEventContext({
+  it("maps normalized inbound facts into a finalized message context", async () => {
+    const ctx = await buildChannelInboundEventContext({
       channel: "test",
       accountId: "acct",
       provider: "test-provider",
@@ -183,8 +183,8 @@ describe("buildChannelInboundEventContext", () => {
     }
   });
 
-  it("uses resolved command authorization instead of recomputing authorizers", () => {
-    const ctx = buildChannelInboundEventContext(
+  it("uses resolved command authorization instead of recomputing authorizers", async () => {
+    const ctx = await buildChannelInboundEventContext(
       createBaseContextParams({
         access: {
           commands: {
@@ -202,8 +202,8 @@ describe("buildChannelInboundEventContext", () => {
     expect(ctx.CommandAuthorized).toBe(false);
   });
 
-  it("carries room event semantics into the finalized context", () => {
-    const ctx = buildChannelInboundEventContext(
+  it("carries room event semantics into the finalized context", async () => {
+    const ctx = await buildChannelInboundEventContext(
       createBaseContextParams({
         message: {
           inboundEventKind: "room_event",
@@ -215,8 +215,8 @@ describe("buildChannelInboundEventContext", () => {
     expect(ctx.InboundEventKind).toBe("room_event");
   });
 
-  it("preserves thread-addressable origins alongside flat reply targets", () => {
-    const ctx = buildChannelInboundEventContext(
+  it("preserves thread-addressable origins alongside flat reply targets", async () => {
+    const ctx = await buildChannelInboundEventContext(
       createBaseContextParams({
         conversation: {
           kind: "group",
@@ -236,8 +236,8 @@ describe("buildChannelInboundEventContext", () => {
     expect(ctx.MessageThreadId).toBe("topic-42");
   });
 
-  it("keeps legacy command authorization fallback for authorizer arrays", () => {
-    const ctx = buildChannelInboundEventContext(
+  it("keeps legacy command authorization fallback for authorizer arrays", async () => {
+    const ctx = await buildChannelInboundEventContext(
       createBaseContextParams({
         access: {
           commands: {
@@ -250,8 +250,8 @@ describe("buildChannelInboundEventContext", () => {
     expect(ctx.CommandAuthorized).toBe(true);
   });
 
-  it("derives command turns from normalized command facts", () => {
-    const ctx = buildChannelInboundEventContext(
+  it("derives command turns from normalized command facts", async () => {
+    const ctx = await buildChannelInboundEventContext(
       createBaseContextParams({
         message: {
           rawBody: "/status",
@@ -280,8 +280,8 @@ describe("buildChannelInboundEventContext", () => {
     expect(ctx.CommandAuthorized).toBe(true);
   });
 
-  it("keeps explicit command turns ahead of normalized command facts", () => {
-    const ctx = buildChannelInboundEventContext(
+  it("keeps explicit command turns ahead of normalized command facts", async () => {
+    const ctx = await buildChannelInboundEventContext(
       createBaseContextParams({
         message: {
           rawBody: "/status",
@@ -311,8 +311,8 @@ describe("buildChannelInboundEventContext", () => {
     expect(ctx.CommandAuthorized).toBe(false);
   });
 
-  it("filters supplemental context with channel visibility policy", () => {
-    const ctx = buildChannelInboundEventContext(
+  it("filters supplemental context with channel visibility policy", async () => {
+    const ctx = await buildChannelInboundEventContext(
       createBaseContextParams({
         supplemental: {
           quote: {
@@ -344,8 +344,8 @@ describe("buildChannelInboundEventContext", () => {
     expect(ctx.ThreadHistoryBody).toBeUndefined();
   });
 
-  it("keeps quoted context in allowlist_quote mode", () => {
-    const ctx = buildChannelInboundEventContext(
+  it("keeps quoted context in allowlist_quote mode", async () => {
+    const ctx = await buildChannelInboundEventContext(
       createBaseContextParams({
         supplemental: {
           quote: {
@@ -369,8 +369,8 @@ describe("buildChannelInboundEventContext", () => {
     expect(ctx.ThreadStarterBody).toBeUndefined();
   });
 
-  it("drops supplemental context with unknown sender allow state in restrictive modes", () => {
-    const ctx = buildChannelInboundEventContext(
+  it("drops supplemental context with unknown sender allow state in restrictive modes", async () => {
+    const ctx = await buildChannelInboundEventContext(
       createBaseContextParams({
         supplemental: {
           quote: {
