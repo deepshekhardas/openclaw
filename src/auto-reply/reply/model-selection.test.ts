@@ -381,7 +381,7 @@ describe("createModelSelectionState catalog loading", () => {
     expect(loadModelCatalog).toHaveBeenCalledOnce();
   });
 
-  it("preserves OpenAI API-key session auth when model policy explicitly pins PI", async () => {
+  it("preserves OpenAI API-key session auth when model policy explicitly pins OpenClaw", async () => {
     authProfileStoreMock.store = {
       version: 1,
       profiles: {
@@ -401,7 +401,7 @@ describe("createModelSelectionState catalog loading", () => {
           providers: {
             openai: {
               baseUrl: "https://api.openai.com/v1",
-              agentRuntime: { id: "pi" },
+              agentRuntime: { id: "openclaw" },
               models: [],
             },
           },
