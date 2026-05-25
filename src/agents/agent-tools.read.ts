@@ -11,7 +11,6 @@ import { expandHomePrefix, resolveOsHomeDir } from "../infra/home-dir.js";
 import { hasEncodedFileUrlSeparator, trySafeFileURLToPath } from "../infra/local-file-access.js";
 import { detectMime } from "../media/mime.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
-import { wrapEditToolWithRecovery } from "./agent-tools.host-edit.js";
 import {
   REQUIRED_PARAM_GROUPS,
   assertRequiredParams,
@@ -809,12 +808,7 @@ export function createSandboxedEditTool(params: SandboxToolParams) {
   const base = createEditTool(params.root, {
     operations: createSandboxEditOperations(params),
   }) as unknown as AnyAgentTool;
-  const withRecovery = wrapEditToolWithRecovery(base, {
-    root: params.root,
-    readFile: async (absolutePath: string) =>
-      (await params.bridge.readFile({ filePath: absolutePath, cwd: params.root })).toString("utf8"),
-  });
-  return wrapToolParamValidation(withRecovery, REQUIRED_PARAM_GROUPS.edit);
+  return wrapToolParamValidation(base, REQUIRED_PARAM_GROUPS.edit);
 }
 
 export function createHostWorkspaceWriteTool(root: string, options?: { workspaceOnly?: boolean }) {
@@ -828,11 +822,7 @@ export function createHostWorkspaceEditTool(root: string, options?: { workspaceO
   const base = createEditTool(root, {
     operations: createHostEditOperations(root, options),
   }) as unknown as AnyAgentTool;
-  const withRecovery = wrapEditToolWithRecovery(base, {
-    root,
-    readFile: (absolutePath: string) => fs.readFile(absolutePath, "utf-8"),
-  });
-  return wrapToolParamValidation(withRecovery, REQUIRED_PARAM_GROUPS.edit);
+  return wrapToolParamValidation(base, REQUIRED_PARAM_GROUPS.edit);
 }
 
 export function createOpenClawReadTool(
