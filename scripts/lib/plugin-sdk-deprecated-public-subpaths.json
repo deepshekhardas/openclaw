@@ -15,6 +15,7 @@
   "channel-reply-pipeline",
   "channel-runtime",
   "channel-secret-runtime",
+  "channel-streaming",
   "channel-target-testing",
   "channel-test-helpers",
   "command-auth",
