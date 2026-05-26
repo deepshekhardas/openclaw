@@ -1146,7 +1146,7 @@ describe("plugin-sdk subpath exports", () => {
       "attachChannelToResult",
       "buildChannelSendResult",
     ]);
-    expectSourceMentions("direct-dm", [
+    expectSourceMentions("channel-inbound", [
       "createDirectDmPreCryptoGuardPolicy",
       "createPreCryptoDirectDmAuthorizer",
       "dispatchInboundDirectDmWithRuntime",
