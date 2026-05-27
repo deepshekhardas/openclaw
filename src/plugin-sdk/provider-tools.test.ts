@@ -203,6 +203,81 @@ describe("buildProviderToolCompatFamilyHooks", () => {
     ).toStrictEqual([]);
   });
 
+  it("cleans schema-valued dependency branches for the gemini family", () => {
+    const hooks = buildProviderToolCompatFamilyHooks("gemini");
+    const geminiCtx = (tools: unknown) =>
+      ({
+        provider: "gemini",
+        modelId: "gemini-3-pro",
+        modelApi: "gemini",
+        model: {
+          provider: "gemini",
+          api: "gemini",
+          id: "gemini-3-pro",
+        },
+        tools,
+      }) as never;
+    const tools = [
+      {
+        name: "fuzzplugin_move_angles",
+        description: "",
+        parameters: {
+          type: "object",
+          properties: {
+            mode: { type: "string" },
+          },
+          dependencies: {
+            mode: {
+              type: "object",
+              properties: {
+                angle: {
+                  type: "string",
+                  maxLength: 32,
+                },
+              },
+              required: ["angle"],
+              additionalProperties: false,
+            },
+            legacy: ["mode"],
+          },
+        },
+      },
+    ] as never;
+
+    expect(hooks.inspectToolSchemas(geminiCtx(tools))).toEqual([
+      {
+        toolName: "fuzzplugin_move_angles",
+        toolIndex: 0,
+        violations: [
+          "fuzzplugin_move_angles.parameters.dependencies.mode.properties.angle.maxLength",
+          "fuzzplugin_move_angles.parameters.dependencies.mode.additionalProperties",
+        ],
+      },
+    ]);
+
+    const normalized = hooks.normalizeToolSchemas(geminiCtx(tools));
+
+    expect(normalized[0]?.parameters).toEqual({
+      type: "object",
+      properties: {
+        mode: { type: "string" },
+      },
+      dependencies: {
+        mode: {
+          type: "object",
+          properties: {
+            angle: {
+              type: "string",
+            },
+          },
+          required: ["angle"],
+        },
+        legacy: ["mode"],
+      },
+    });
+    expect(hooks.inspectToolSchemas(geminiCtx(normalized))).toStrictEqual([]);
+  });
+
   it("normalizes parameter-free and typed-object schemas for the openai family", () => {
     const hooks = buildProviderToolCompatFamilyHooks("openai");
     const tools = [

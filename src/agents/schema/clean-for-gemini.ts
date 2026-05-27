@@ -245,6 +245,49 @@ function sanitizeRequiredFields(schema: Record<string, unknown>): Record<string,
   return schema;
 }
 
+function cleanSchemaMapForGemini(
+  value: unknown,
+  defs: SchemaDefs | undefined,
+  refStack: Set<string> | undefined,
+): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+      key,
+      cleanSchemaForGeminiWithDefs(entry, defs, refStack),
+    ]),
+  );
+}
+
+function cleanDependenciesForGemini(
+  value: unknown,
+  defs: SchemaDefs | undefined,
+  refStack: Set<string> | undefined,
+): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+      key,
+      Array.isArray(entry) ? entry : cleanSchemaForGeminiWithDefs(entry, defs, refStack),
+    ]),
+  );
+}
+
+const SCHEMA_OBJECT_KEYS = new Set([
+  "additionalItems",
+  "contains",
+  "else",
+  "if",
+  "propertyNames",
+  "then",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+]);
+
 function cleanSchemaForGeminiWithDefs(
   schema: unknown,
   defs: SchemaDefs | undefined,
@@ -383,6 +426,14 @@ function cleanSchemaForGeminiWithDefs(
       cleaned[key] = value.map((variant) =>
         cleanSchemaForGeminiWithDefs(variant, nextDefs, refStack),
       );
+    } else if (key === "prefixItems" && Array.isArray(value)) {
+      cleaned[key] = value.map((entry) => cleanSchemaForGeminiWithDefs(entry, nextDefs, refStack));
+    } else if (key === "dependentSchemas") {
+      cleaned[key] = cleanSchemaMapForGemini(value, nextDefs, refStack);
+    } else if (key === "dependencies") {
+      cleaned[key] = cleanDependenciesForGemini(value, nextDefs, refStack);
+    } else if (SCHEMA_OBJECT_KEYS.has(key)) {
+      cleaned[key] = cleanSchemaForGeminiWithDefs(value, nextDefs, refStack);
     } else {
       cleaned[key] = value;
     }

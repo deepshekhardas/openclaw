@@ -223,4 +223,68 @@ describe("cleanSchemaForGemini", () => {
 
     expect(cleaned.properties?.agentId?.type).toBe("string");
   });
+
+  it("cleans schema-valued dependency branches", () => {
+    const cleaned = cleanSchemaForGemini({
+      type: "object",
+      properties: {
+        mode: { type: "string" },
+      },
+      dependencies: {
+        mode: {
+          type: "object",
+          properties: {
+            angle: {
+              type: "string",
+              maxLength: 32,
+            },
+          },
+          required: ["angle"],
+          additionalProperties: false,
+        },
+        legacy: ["mode"],
+      },
+      dependentSchemas: {
+        mode: {
+          type: "object",
+          properties: {
+            precision: {
+              type: "string",
+              pattern: "^[0-9]+$",
+            },
+          },
+        },
+      },
+      if: {
+        type: "object",
+        properties: {
+          flag: { type: "string", minLength: 1 },
+        },
+      },
+      then: {
+        type: "object",
+        properties: {
+          next: { type: "string", maxLength: 4 },
+        },
+      },
+      prefixItems: [{ type: "string", minLength: 1 }],
+    }) as {
+      dependencies?: {
+        mode?: { additionalProperties?: unknown; properties?: { angle?: Record<string, unknown> } };
+        legacy?: string[];
+      };
+      dependentSchemas?: { mode?: { properties?: { precision?: Record<string, unknown> } } };
+      if?: { properties?: { flag?: Record<string, unknown> } };
+      then?: { properties?: { next?: Record<string, unknown> } };
+      prefixItems?: Array<Record<string, unknown>>;
+    };
+
+    expect(cleaned.dependencies?.mode?.additionalProperties).toBeUndefined();
+    expect(cleaned.dependencies?.mode?.properties?.angle?.maxLength).toBeUndefined();
+    expect(cleaned.dependencies?.legacy).toEqual(["mode"]);
+    expect(cleaned.dependentSchemas?.mode?.properties?.precision?.pattern).toBeUndefined();
+    expect(cleaned.if?.properties?.flag?.minLength).toBeUndefined();
+    expect(cleaned.then?.properties?.next?.maxLength).toBeUndefined();
+    expect(cleaned.prefixItems?.[0]?.minLength).toBeUndefined();
+  });
 });
