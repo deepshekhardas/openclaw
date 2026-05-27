@@ -140,7 +140,7 @@ describe("runtime tool input schema projection", () => {
       parameters: { type: "object", properties: {} },
     };
     const broken = {
-      name: "dofbot_move_angles",
+      name: "fuzz_move_angles",
       parameters: { type: "array", items: { type: "number" } },
     };
 
@@ -148,9 +148,9 @@ describe("runtime tool input schema projection", () => {
       tools: [healthy],
       diagnostics: [
         {
-          toolName: "dofbot_move_angles",
+          toolName: "fuzz_move_angles",
           toolIndex: 1,
-          violations: ['dofbot_move_angles.parameters.type must be "object"'],
+          violations: ['fuzz_move_angles.parameters.type must be "object"'],
         },
       ],
     });
