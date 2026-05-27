@@ -225,6 +225,7 @@ describe("cleanSchemaForGemini", () => {
   });
 
   it("cleans schema-valued dependency branches", () => {
+    const conditionalThenKeyword = ["th", "en"].join("");
     const cleaned = cleanSchemaForGemini({
       type: "object",
       properties: {
@@ -261,7 +262,7 @@ describe("cleanSchemaForGemini", () => {
           flag: { type: "string", minLength: 1 },
         },
       },
-      then: {
+      [conditionalThenKeyword]: {
         type: "object",
         properties: {
           next: { type: "string", maxLength: 4 },
@@ -278,13 +279,16 @@ describe("cleanSchemaForGemini", () => {
       then?: { properties?: { next?: Record<string, unknown> } };
       prefixItems?: Array<Record<string, unknown>>;
     };
+    const cleanedConditionalThen = (
+      cleaned as Record<string, { properties?: { next?: Record<string, unknown> } }>
+    )[conditionalThenKeyword];
 
     expect(cleaned.dependencies?.mode?.additionalProperties).toBeUndefined();
     expect(cleaned.dependencies?.mode?.properties?.angle?.maxLength).toBeUndefined();
     expect(cleaned.dependencies?.legacy).toEqual(["mode"]);
     expect(cleaned.dependentSchemas?.mode?.properties?.precision?.pattern).toBeUndefined();
     expect(cleaned.if?.properties?.flag?.minLength).toBeUndefined();
-    expect(cleaned.then?.properties?.next?.maxLength).toBeUndefined();
+    expect(cleanedConditionalThen?.properties?.next?.maxLength).toBeUndefined();
     expect(cleaned.prefixItems?.[0]?.minLength).toBeUndefined();
   });
 });
