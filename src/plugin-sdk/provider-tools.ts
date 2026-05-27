@@ -37,10 +37,42 @@ export function stripUnsupportedSchemaKeywords(
       );
       continue;
     }
+    if (
+      (key === "$defs" ||
+        key === "definitions" ||
+        key === "dependentSchemas" ||
+        key === "patternProperties") &&
+      isSchemaMap(value)
+    ) {
+      cleaned[key] = Object.fromEntries(
+        Object.entries(value).map(([childKey, childValue]) => [
+          childKey,
+          stripUnsupportedSchemaKeywords(childValue, unsupportedKeywords),
+        ]),
+      );
+      continue;
+    }
+    if (key === "dependencies" && isSchemaMap(value)) {
+      cleaned[key] = Object.fromEntries(
+        Object.entries(value).map(([childKey, childValue]) => [
+          childKey,
+          Array.isArray(childValue)
+            ? childValue
+            : stripUnsupportedSchemaKeywords(childValue, unsupportedKeywords),
+        ]),
+      );
+      continue;
+    }
     if (key === "items" && value && typeof value === "object") {
       cleaned[key] = Array.isArray(value)
         ? value.map((entry) => stripUnsupportedSchemaKeywords(entry, unsupportedKeywords))
         : stripUnsupportedSchemaKeywords(value, unsupportedKeywords);
+      continue;
+    }
+    if (key === "prefixItems" && Array.isArray(value)) {
+      cleaned[key] = value.map((entry) =>
+        stripUnsupportedSchemaKeywords(entry, unsupportedKeywords),
+      );
       continue;
     }
     if ((key === "anyOf" || key === "oneOf" || key === "allOf") && Array.isArray(value)) {
@@ -49,10 +81,31 @@ export function stripUnsupportedSchemaKeywords(
       );
       continue;
     }
+    if (SCHEMA_OBJECT_KEYWORDS.has(key)) {
+      cleaned[key] = stripUnsupportedSchemaKeywords(value, unsupportedKeywords);
+      continue;
+    }
     cleaned[key] = value;
   }
   return cleaned;
 }
+
+function isSchemaMap(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+const SCHEMA_OBJECT_KEYWORDS = new Set([
+  "additionalItems",
+  "additionalProperties",
+  "contains",
+  "else",
+  "if",
+  "not",
+  "propertyNames",
+  "then",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+]);
 
 export function findUnsupportedSchemaKeywords(
   schema: unknown,

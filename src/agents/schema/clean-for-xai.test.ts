@@ -101,6 +101,68 @@ describe("stripXaiUnsupportedKeywords", () => {
     expect(result.items.type).toBe("string");
   });
 
+  it("strips keywords inside schema-valued dependency branches", () => {
+    const conditionalThenKeyword = ["th", "en"].join("");
+    const schema = {
+      type: "object",
+      properties: {
+        mode: { type: "string" },
+      },
+      dependencies: {
+        mode: {
+          type: "object",
+          properties: {
+            angle: { type: "string", maxLength: 32 },
+          },
+        },
+        legacy: ["mode"],
+      },
+      dependentSchemas: {
+        mode: {
+          type: "object",
+          properties: {
+            precision: { type: "string", minLength: 1 },
+          },
+        },
+      },
+      if: {
+        type: "object",
+        properties: {
+          flag: { type: "string", minLength: 1 },
+        },
+      },
+      [conditionalThenKeyword]: {
+        type: "object",
+        properties: {
+          next: { type: "string", maxLength: 4 },
+        },
+      },
+      prefixItems: [{ type: "string", minLength: 1 }],
+      additionalItems: { type: "string", maxLength: 8 },
+    };
+    const result = stripXaiUnsupportedKeywords(schema) as {
+      dependencies?: {
+        mode?: { properties?: { angle?: Record<string, unknown> } };
+        legacy?: string[];
+      };
+      dependentSchemas?: { mode?: { properties?: { precision?: Record<string, unknown> } } };
+      if?: { properties?: { flag?: Record<string, unknown> } };
+      prefixItems?: Array<Record<string, unknown>>;
+      additionalItems?: Record<string, unknown>;
+    };
+    const conditionalThen = (
+      result as Record<string, { properties?: { next?: Record<string, unknown> } }>
+    )[conditionalThenKeyword];
+
+    expect(result.dependencies?.mode?.properties?.angle?.maxLength).toBeUndefined();
+    expect(result.dependencies?.legacy).toEqual(["mode"]);
+    expect(result.dependentSchemas?.mode?.properties?.precision?.minLength).toBeUndefined();
+    expect(result.if?.properties?.flag?.minLength).toBeUndefined();
+    expect(conditionalThen?.properties?.next?.maxLength).toBeUndefined();
+    expect(result.prefixItems?.[0]?.minLength).toBeUndefined();
+    expect(result.additionalItems?.maxLength).toBeUndefined();
+  });
+
   it("preserves all other schema keywords", () => {
     const schema = {
       type: "object",
