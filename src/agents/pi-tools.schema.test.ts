@@ -187,6 +187,56 @@ describe("normalizeToolParameterSchema", () => {
     });
   });
 
+  it("inlines local $ref schemas in dependency and additional item keywords", () => {
+    expect(
+      normalizeToolParameterSchema({
+        type: "object",
+        properties: {
+          token: { type: "string" },
+          tuple: {
+            type: "array",
+            items: [{ type: "string" }],
+            additionalItems: { $ref: "#/$defs/ExtraTupleValue" },
+          },
+        },
+        dependencies: {
+          token: { $ref: "#/$defs/TokenDependency" },
+          tuple: ["token"],
+        },
+        $defs: {
+          ExtraTupleValue: { type: "number" },
+          TokenDependency: {
+            type: "object",
+            properties: {
+              scope: { type: "string" },
+            },
+            required: ["scope"],
+          },
+        },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: {
+        token: { type: "string" },
+        tuple: {
+          type: "array",
+          items: [{ type: "string" }],
+          additionalItems: { type: "number" },
+        },
+      },
+      dependencies: {
+        token: {
+          type: "object",
+          properties: {
+            scope: { type: "string" },
+          },
+          required: ["scope"],
+        },
+        tuple: ["token"],
+      },
+    });
+  });
+
   it("inlines local $ref schemas that target nested JSON Pointer paths", () => {
     expect(
       normalizeToolParameterSchema({

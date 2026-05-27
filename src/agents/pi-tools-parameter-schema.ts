@@ -188,6 +188,7 @@ function normalizeArraySchemasMissingItems(schema: unknown): unknown {
   };
 
   for (const key of [
+    "additionalItems",
     "items",
     "contains",
     "additionalProperties",
@@ -207,6 +208,7 @@ function normalizeArraySchemasMissingItems(schema: unknown): unknown {
   for (const key of [
     "properties",
     "patternProperties",
+    "dependencies",
     "dependentSchemas",
     "$defs",
     "definitions",
@@ -240,6 +242,7 @@ function schemaAllowsArrayType(schema: Record<string, unknown>): boolean {
 }
 
 const ARRAY_ITEMS_SCHEMA_OBJECT_KEYS = new Set([
+  "additionalItems",
   "additionalProperties",
   "contains",
   "else",
@@ -248,6 +251,8 @@ const ARRAY_ITEMS_SCHEMA_OBJECT_KEYS = new Set([
   "not",
   "propertyNames",
   "then",
+  "unevaluatedItems",
+  "unevaluatedProperties",
 ]);
 
 const ARRAY_ITEMS_SCHEMA_ARRAY_KEYS = new Set(["allOf", "anyOf", "oneOf", "prefixItems"]);
@@ -255,6 +260,7 @@ const ARRAY_ITEMS_SCHEMA_ARRAY_KEYS = new Set(["allOf", "anyOf", "oneOf", "prefi
 const ARRAY_ITEMS_SCHEMA_MAP_KEYS = new Set([
   "$defs",
   "definitions",
+  "dependencies",
   "dependentSchemas",
   "patternProperties",
   "properties",
@@ -408,12 +414,14 @@ function resolveLocalJsonPointer(rootDocument: unknown, ref: string): unknown {
 const SCHEMA_MAP_KEYS = new Set([
   "$defs",
   "definitions",
+  "dependencies",
   "dependentSchemas",
   "patternProperties",
   "properties",
 ]);
 
 const SCHEMA_OBJECT_KEYS = new Set([
+  "additionalItems",
   "additionalProperties",
   "contains",
   "else",
@@ -422,6 +430,8 @@ const SCHEMA_OBJECT_KEYS = new Set([
   "not",
   "propertyNames",
   "then",
+  "unevaluatedItems",
+  "unevaluatedProperties",
 ]);
 
 const SCHEMA_ARRAY_KEYS = new Set(["allOf", "anyOf", "items", "oneOf", "prefixItems"]);
