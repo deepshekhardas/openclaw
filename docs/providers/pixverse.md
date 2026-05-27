@@ -7,12 +7,12 @@ read_when:
   - You want to make PixVerse the default video provider
 ---
 
-OpenClaw ships a bundled `pixverse` provider for hosted PixVerse video generation. The plugin is enabled by default and registers the `pixverse` provider against the `videoGenerationProviders` contract.
+OpenClaw provides `pixverse` as an official external plugin for hosted PixVerse video generation. The plugin registers the `pixverse` provider against the `videoGenerationProviders` contract.
 
 | Property           | Value                                                                |
 | ------------------ | -------------------------------------------------------------------- |
 | Provider id        | `pixverse`                                                           |
-| Plugin             | bundled, `enabledByDefault: true`                                    |
+| Plugin package     | `@openclaw/pixverse-provider`                                        |
 | Auth env var       | `PIXVERSE_API_KEY`                                                   |
 | Onboarding flag    | `--auth-choice pixverse-api-key`                                     |
 | Direct CLI flag    | `--pixverse-api-key <key>`                                           |
@@ -23,6 +23,12 @@ OpenClaw ships a bundled `pixverse` provider for hosted PixVerse video generatio
 ## Getting started
 
 <Steps>
+  <Step title="Install the plugin">
+    ```bash
+    openclaw plugins install @openclaw/pixverse-provider
+    openclaw gateway restart
+    ```
+  </Step>
   <Step title="Set the API key">
     ```bash
     openclaw onboard --auth-choice pixverse-api-key
@@ -93,6 +99,11 @@ The video provider accepts these optional provider-specific keys:
   <Accordion title="API region">
     OpenClaw defaults to the international PixVerse API. Set `models.providers.pixverse.region`
     when your key belongs to a specific PixVerse platform region:
+
+    | Region value    | PixVerse API base URL                         |
+    | --------------- | --------------------------------------------- |
+    | `international` | `https://app-api.pixverse.ai/openapi/v2`      |
+    | `cn`            | `https://app-api.pixverseai.cn/openapi/v2`    |
 
     ```json5
     {

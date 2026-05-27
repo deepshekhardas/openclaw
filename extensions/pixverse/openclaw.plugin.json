@@ -1,5 +1,6 @@
 {
   "id": "pixverse",
+  "description": "Adds PixVerse video generation provider support to OpenClaw.",
   "activation": {
     "onStartup": false
   },
@@ -13,6 +14,7 @@
       "method": "api-key",
       "choiceId": "pixverse-api-key",
       "choiceLabel": "PixVerse API key",
+      "choiceHint": "Default International endpoint; set models.providers.pixverse.region to cn for the CN endpoint.",
       "groupId": "pixverse",
       "groupLabel": "PixVerse",
       "groupHint": "API key",
