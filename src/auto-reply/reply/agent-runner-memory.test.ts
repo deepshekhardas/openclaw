@@ -1159,7 +1159,7 @@ describe("runMemoryFlushIfNeeded", () => {
     expect(refreshQueuedFollowupSessionMock).not.toHaveBeenCalled();
   });
 
-  it("uses the persisted Codex runtime context window for OpenAI preflight compaction", async () => {
+  it("skips OpenClaw preflight compaction for persisted Codex runtime sessions", async () => {
     registerMemoryFlushPlanResolverForTest(() => ({
       softThresholdTokens: 4_000,
       forceFlushTranscriptBytes: 1_000_000_000,
@@ -1176,7 +1176,7 @@ describe("runMemoryFlushIfNeeded", () => {
       agentHarnessId: "codex",
     };
 
-    await runPreflightCompactionIfNeeded({
+    const entry = await runPreflightCompactionIfNeeded({
       cfg: {
         models: {
           providers: {
@@ -1201,12 +1201,11 @@ describe("runMemoryFlushIfNeeded", () => {
       replyOperation: createReplyOperation(),
     });
 
-    expect(compactEmbeddedAgentSessionMock).toHaveBeenCalledTimes(1);
-    const compactCall = requireCompactEmbeddedAgentSessionCall();
-    expect(compactCall.currentTokenCount).toBe(347_000);
+    expect(entry).toBe(sessionEntry);
+    expect(compactEmbeddedAgentSessionMock).not.toHaveBeenCalled();
   });
 
-  it("still compacts when a fresh persisted token total is over the threshold", async () => {
+  it("skips fresh persisted token totals for persisted Codex runtime sessions", async () => {
     registerMemoryFlushPlanResolverForTest(() => ({
       softThresholdTokens: 4_000,
       forceFlushTranscriptBytes: 1_000_000_000,
@@ -1223,7 +1222,7 @@ describe("runMemoryFlushIfNeeded", () => {
       agentHarnessId: "codex",
     };
 
-    await runPreflightCompactionIfNeeded({
+    const entry = await runPreflightCompactionIfNeeded({
       cfg: {
         models: {
           providers: {
@@ -1248,9 +1247,8 @@ describe("runMemoryFlushIfNeeded", () => {
       replyOperation: createReplyOperation(),
     });
 
-    expect(compactEmbeddedAgentSessionMock).toHaveBeenCalledTimes(1);
-    const compactCall = requireCompactEmbeddedAgentSessionCall();
-    expect(compactCall.currentTokenCount).toBe(347_000);
+    expect(entry).toBe(sessionEntry);
+    expect(compactEmbeddedAgentSessionMock).not.toHaveBeenCalled();
   });
 
   it("keeps the OpenAI API context window for persisted OpenClaw runtime overrides", async () => {
