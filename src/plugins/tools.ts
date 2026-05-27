@@ -30,18 +30,20 @@ import {
   type PluginToolDescriptorConfigCacheKeyMemo,
   writeCachedPluginToolDescriptors,
 } from "./tool-descriptor-cache.js";
+import { setPluginToolMeta } from "./tool-metadata.js";
 import type { OpenClawPluginToolContext } from "./types.js";
 
 export {
   resetPluginToolDescriptorCache,
   resetPluginToolDescriptorCache as resetPluginToolFactoryCache,
 } from "./tool-descriptor-cache.js";
-
-export type PluginToolMeta = {
-  pluginId: string;
-  optional: boolean;
-  trustedLocalMedia?: boolean;
-};
+export {
+  buildPluginToolMetadataKey,
+  copyPluginToolMeta,
+  getPluginToolMeta,
+  setPluginToolMeta,
+  type PluginToolMeta,
+} from "./tool-metadata.js";
 
 type PluginToolFactoryTimingResult = "array" | "error" | "null" | "single";
 
@@ -61,30 +63,6 @@ const log = createSubsystemLogger("plugins/tools");
 const PLUGIN_TOOL_FACTORY_WARN_TOTAL_MS = 5_000;
 const PLUGIN_TOOL_FACTORY_WARN_FACTORY_MS = 1_000;
 const PLUGIN_TOOL_FACTORY_SUMMARY_LIMIT = 20;
-
-const pluginToolMeta = new WeakMap<AnyAgentTool, PluginToolMeta>();
-
-export function setPluginToolMeta(tool: AnyAgentTool, meta: PluginToolMeta): void {
-  pluginToolMeta.set(tool, meta);
-}
-
-export function getPluginToolMeta(tool: AnyAgentTool): PluginToolMeta | undefined {
-  return pluginToolMeta.get(tool);
-}
-
-export function copyPluginToolMeta(source: AnyAgentTool, target: AnyAgentTool): void {
-  const meta = pluginToolMeta.get(source);
-  if (meta) {
-    pluginToolMeta.set(target, meta);
-  }
-}
-
-/**
- * Builds a collision-proof key for plugin-owned tool metadata lookups.
- */
-export function buildPluginToolMetadataKey(pluginId: string, toolName: string): string {
-  return JSON.stringify([pluginId, toolName]);
-}
 
 function normalizeAllowlist(list?: string[]) {
   return new Set(normalizeUniqueStringEntries((list ?? []).map(normalizeToolName)));
@@ -1207,7 +1185,7 @@ export function resolvePluginTools(params: {
         manifestPlugin,
         toolName: tool.name,
       });
-      pluginToolMeta.set(tool, {
+      setPluginToolMeta(tool, {
         pluginId: entry.pluginId,
         optional,
         trustedLocalMedia: isTrustedManifestLocalMediaTool({

@@ -111,8 +111,18 @@ export function createCodexDynamicToolBridge(params: {
     };
   });
   const toolMap = new Map(availableTools.map(({ tool }) => [tool.name, tool]));
-  const registeredTools = registeredProjection.tools.map(({ tool }) => tool);
+  const registeredProjectedTools = params.registeredTools
+    ? mergeProjectedRegisteredTools({
+        filteredRegisteredTools: registeredProjection.tools,
+        rawRegisteredTools: params.registeredTools,
+        availableTools,
+      })
+    : registeredProjection.tools;
+  const registeredTools = registeredProjectedTools.map(({ tool }) => tool);
   const registeredToolNames = new Set(registeredTools.map((tool) => tool.name));
+  const availableQuarantinedToolNames = new Set(
+    availableProjection.quarantinedTools.map((tool) => tool.tool),
+  );
   const quarantinedTools = dedupeQuarantinedDynamicTools([
     ...availableProjection.quarantinedTools,
     ...registeredProjection.quarantinedTools,
@@ -148,7 +158,7 @@ export function createCodexDynamicToolBridge(params: {
         directToolNames,
       }),
     ),
-    specs: registeredProjection.tools.map(({ tool, inputSchema }) =>
+    specs: registeredProjectedTools.map(({ tool, inputSchema }) =>
       createCodexDynamicToolSpec({
         tool,
         inputSchema,
@@ -158,6 +168,17 @@ export function createCodexDynamicToolBridge(params: {
     ),
     telemetry,
     handleToolCall: async (call, options) => {
+      if (availableQuarantinedToolNames.has(call.tool)) {
+        return {
+          contentItems: [
+            {
+              type: "inputText",
+              text: `OpenClaw tool is disabled because its Codex dynamic tool schema is unsupported: ${call.tool}`,
+            },
+          ],
+          success: false,
+        };
+      }
       const tool = toolMap.get(call.tool);
       if (!tool) {
         if (registeredToolNames.has(call.tool)) {
@@ -352,6 +373,29 @@ function dedupeQuarantinedDynamicTools(
     ).values(),
   ];
 }
+
+function mergeProjectedRegisteredTools(params: {
+  filteredRegisteredTools: ProjectedCodexDynamicTool[];
+  rawRegisteredTools: readonly AnyAgentTool[];
+  availableTools: readonly ProjectedCodexDynamicTool[];
+}): ProjectedCodexDynamicTool[] {
+  const merged = [...params.filteredRegisteredTools];
+  const mergedNames = new Set(merged.map(({ tool }) => tool.name));
+  const availableByName = new Map(params.availableTools.map((tool) => [tool.tool.name, tool]));
+  for (const registeredTool of params.rawRegisteredTools) {
+    if (mergedNames.has(registeredTool.name)) {
+      continue;
+    }
+    const availableTool = availableByName.get(registeredTool.name);
+    if (!availableTool) {
+      continue;
+    }
+    merged.push(availableTool);
+    mergedNames.add(registeredTool.name);
+  }
+  return merged;
+}
+
 function toToolResultHookContext(
   ctx: CodexDynamicToolHookContext | undefined,
 ): CodexToolResultHookContext {

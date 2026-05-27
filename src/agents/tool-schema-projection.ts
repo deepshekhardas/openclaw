@@ -122,6 +122,92 @@ const schemaMapKeywords = new Set([
   "properties",
 ]);
 
+const schemaArrayKeywords = new Set(["allOf", "anyOf", "oneOf", "prefixItems"]);
+
+const optionalSchemaValueKeywords = new Set([
+  "additionalItems",
+  "additionalProperties",
+  "contains",
+  "else",
+  "if",
+  "items",
+  "not",
+  "propertyNames",
+  "then",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+]);
+
+function findSchemaShapeViolations(schema: RuntimeToolInputSchemaJson, path: string): string[] {
+  if (typeof schema === "boolean") {
+    return [];
+  }
+  if (!isJsonObject(schema)) {
+    return [`${path} must be a JSON Schema object or boolean`];
+  }
+  const violations: string[] = [];
+  for (const key of schemaMapKeywords) {
+    const value = schema[key];
+    if (value === undefined) {
+      continue;
+    }
+    if (!isJsonObject(value)) {
+      violations.push(`${path}.${key} must be a schema map object`);
+      continue;
+    }
+    for (const [schemaName, childSchema] of Object.entries(value)) {
+      if (key === "dependencies" && Array.isArray(childSchema)) {
+        childSchema.forEach((entry, index) => {
+          if (typeof entry !== "string") {
+            violations.push(`${path}.${key}.${schemaName}[${index}] must be a string`);
+          }
+        });
+        continue;
+      }
+      violations.push(...findSchemaShapeViolations(childSchema, `${path}.${key}.${schemaName}`));
+    }
+  }
+  for (const key of schemaArrayKeywords) {
+    const value = schema[key];
+    if (value === undefined) {
+      continue;
+    }
+    if (!Array.isArray(value)) {
+      violations.push(`${path}.${key} must be a schema array`);
+      continue;
+    }
+    value.forEach((entry, index) => {
+      violations.push(...findSchemaShapeViolations(entry, `${path}.${key}[${index}]`));
+    });
+  }
+  for (const key of optionalSchemaValueKeywords) {
+    const value = schema[key];
+    if (value === undefined) {
+      continue;
+    }
+    if (key === "items" && Array.isArray(value)) {
+      value.forEach((entry, index) => {
+        violations.push(...findSchemaShapeViolations(entry, `${path}.items[${index}]`));
+      });
+      continue;
+    }
+    violations.push(...findSchemaShapeViolations(value, `${path}.${key}`));
+  }
+  const required = schema.required;
+  if (required !== undefined) {
+    if (!Array.isArray(required)) {
+      violations.push(`${path}.required must be an array of strings`);
+    } else {
+      required.forEach((entry, index) => {
+        if (typeof entry !== "string") {
+          violations.push(`${path}.required[${index}] must be a string`);
+        }
+      });
+    }
+  }
+  return violations;
+}
+
 export function projectRuntimeToolInputSchema(
   schema: unknown,
   path = "parameters",
@@ -132,6 +218,8 @@ export function projectRuntimeToolInputSchema(
     violations.push(`${path} must be a JSON object schema`);
   } else if (projection.schema.type !== undefined && projection.schema.type !== "object") {
     violations.push(`${path}.type must be "object"`);
+  } else {
+    violations.push(...findSchemaShapeViolations(projection.schema, path));
   }
   violations.push(...findDynamicSchemaKeywordViolations(projection.schema, path));
   return {
