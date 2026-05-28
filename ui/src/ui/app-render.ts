@@ -2900,6 +2900,7 @@ export function renderApp(state: AppViewState) {
                   localMediaPreviewRoots: state.localMediaPreviewRoots,
                   embedSandboxMode: state.embedSandboxMode,
                   allowExternalEmbedUrls: state.allowExternalEmbedUrls,
+                  mathRendering: state.mathRendering,
                   assistantAttachmentAuthToken: resolveAssistantAttachmentAuthToken(state),
                   basePath: state.basePath ?? "",
                 }),

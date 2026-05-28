@@ -51,6 +51,8 @@ import {
 import { getExpandedToolCards, syncToolCardExpansionState } from "../chat/tool-expansion-state.ts";
 import type { EmbedSandboxMode } from "../embed-sandbox.ts";
 import { icons } from "../icons.ts";
+import { preloadKatex, loadKatexCss } from "../katex-renderer.ts";
+import { clearMarkdownCache } from "../markdown.ts";
 import type { SidebarContent } from "../sidebar-content.ts";
 import { detectTextDirection } from "../text-direction.ts";
 import type { SessionsListResult } from "../types.ts";
@@ -170,6 +172,7 @@ export type ChatProps = {
   onCloseSidebar?: () => void;
   onSplitRatioChange?: (ratio: number) => void;
   onChatScroll?: (event: Event) => void;
+  mathRendering?: "off" | "katex";
   basePath?: string;
 };
 
@@ -1063,6 +1066,16 @@ function renderSlashMenu(
 }
 
 export function renderChat(props: ChatProps) {
+  // Preload KaTeX when math rendering is enabled
+  if (props.mathRendering === "katex") {
+    preloadKatex().then(() => {
+      clearMarkdownCache();
+      const requestUpdate = props.onRequestUpdate ?? (() => {});
+      requestUpdate();
+    });
+    loadKatexCss();
+  }
+
   const canCompose = props.connected;
   const isBusy = props.sending || props.stream !== null;
   const canAbort = Boolean(props.canAbort && props.onAbort);
@@ -1264,6 +1277,7 @@ export function renderChat(props: ChatProps) {
                 canvasPluginSurfaceUrl: props.canvasPluginSurfaceUrl,
                 embedSandboxMode: props.embedSandboxMode ?? "scripts",
                 allowExternalEmbedUrls: props.allowExternalEmbedUrls ?? false,
+                mathRendering: props.mathRendering,
                 contextWindow:
                   activeSession?.contextTokens ?? props.sessions?.defaults?.contextTokens ?? null,
                 onDelete: () => {
