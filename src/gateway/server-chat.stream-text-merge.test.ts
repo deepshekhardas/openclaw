@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  MAX_LIVE_CHAT_BUFFER_CHARS,
-  resolveMergedAssistantText,
-} from "./live-chat-projector.js";
+import { MAX_LIVE_CHAT_BUFFER_CHARS, resolveMergedAssistantText } from "./live-chat-projector.js";
 
 describe("server chat stream text merge", () => {
   it.each([
@@ -48,6 +45,28 @@ describe("server chat stream text merge", () => {
         nextDelta: " world",
       }),
     ).toBe("Hello world");
+  });
+
+  it("honors explicit replacements even when the new text is a shorter prefix", () => {
+    expect(
+      resolveMergedAssistantText({
+        previousText: "Hello world",
+        nextText: "Hello",
+        nextDelta: "",
+        nextReplace: true,
+      }),
+    ).toBe("Hello");
+  });
+
+  it("honors explicit empty replacements", () => {
+    expect(
+      resolveMergedAssistantText({
+        previousText: "Hello world",
+        nextText: "",
+        nextDelta: "",
+        nextReplace: true,
+      }),
+    ).toBe("");
   });
 
   it("keeps non-prefix incremental segments after tool calls", () => {

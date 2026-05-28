@@ -25,14 +25,16 @@ function createMessageUpdateContext(
     onAgentEvent?: ReturnType<typeof vi.fn>;
     onPartialReply?: ReturnType<typeof vi.fn>;
     flushBlockReplyBuffer?: ReturnType<typeof vi.fn>;
+    resetAssistantTextStreamState?: () => void;
     resetAssistantMessageState?: ReturnType<typeof vi.fn>;
     debug?: ReturnType<typeof vi.fn>;
     shouldEmitPartialReplies?: boolean;
     consumePartialReplyDirectives?: ReturnType<typeof vi.fn>;
+    stripBlockTags?: ReturnType<typeof vi.fn>;
     state?: Record<string, unknown>;
   } = {},
 ) {
-  return {
+  const context = {
     params: {
       runId: "run-1",
       session: { id: "session-1" },
@@ -46,6 +48,11 @@ function createMessageUpdateContext(
       streamReasoning: false,
       deltaBuffer: "",
       blockBuffer: "",
+      blockState: {
+        thinking: false,
+        final: false,
+        inlineCode: createInlineCodeState(),
+      },
       partialBlockState: {
         thinking: false,
         final: false,
@@ -64,7 +71,7 @@ function createMessageUpdateContext(
     },
     log: { debug: params.debug ?? vi.fn() },
     noteLastAssistant: vi.fn(),
-    stripBlockTags: (text: string) => text,
+    stripBlockTags: params.stripBlockTags ?? ((text: string) => text),
     consumePartialReplyDirectives: params.consumePartialReplyDirectives ?? vi.fn(() => null),
     emitReasoningStream: vi.fn(),
     flushBlockReplyBuffer: params.flushBlockReplyBuffer ?? vi.fn(),
@@ -72,6 +79,22 @@ function createMessageUpdateContext(
     recordAssistantUsage: vi.fn(),
     commitAssistantUsage: vi.fn(),
   } as unknown as EmbeddedAgentSubscribeContext;
+  context.resetAssistantTextStreamState =
+    params.resetAssistantTextStreamState ??
+    vi.fn(() => {
+      context.state.deltaBuffer = "";
+      context.state.blockBuffer = "";
+      context.blockChunker?.reset();
+      context.state.blockState.thinking = false;
+      context.state.blockState.final = false;
+      context.state.blockState.inlineCode = createInlineCodeState();
+      context.state.blockState.pendingTagFragment = undefined;
+      context.state.partialBlockState.thinking = false;
+      context.state.partialBlockState.final = false;
+      context.state.partialBlockState.inlineCode = createInlineCodeState();
+      context.state.partialBlockState.pendingTagFragment = undefined;
+    });
+  return context;
 }
 
 function createMessageEndContext(
@@ -289,6 +312,332 @@ describe("pending assistant reply directives", () => {
 });
 
 describe("handleMessageUpdate text signatures", () => {
+  it("keeps unphased text deltas independent from large partial snapshots", () => {
+    const onAgentEvent = vi.fn();
+    const stripBlockTags = vi.fn((text: string) => text);
+    const context = createMessageUpdateContext({
+      onAgentEvent,
+      stripBlockTags,
+      consumePartialReplyDirectives: vi.fn((text: string) => ({ text })),
+      state: { deltaBuffer: "x".repeat(20_000) },
+    });
+
+    handleMessageUpdate(context, {
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: {
+        type: "text_delta",
+        contentIndex: 0,
+        delta: "a",
+        partial: {
+          role: "assistant",
+          content: [{ type: "text", text: "x".repeat(20_000) }],
+          stopReason: "stop",
+          api: "ollama",
+          provider: "ollama",
+          model: "qwen3:32b",
+          usage: {},
+          timestamp: 0,
+        },
+      },
+    } as never);
+
+    expect(context.state.deltaBuffer).toBe(`${"x".repeat(20_000)}a`);
+    expect(stripBlockTags.mock.calls.map(([text]) => text.length)).toEqual([1]);
+    expect(firstMockArg(onAgentEvent, "agent event")).toEqual({
+      stream: "assistant",
+      data: {
+        text: "a",
+        delta: "a",
+        replace: undefined,
+        mediaUrls: undefined,
+        phase: undefined,
+      },
+    });
+  });
+
+  it("uses replacement text deltas as full streamed text", () => {
+    const onAgentEvent = vi.fn();
+    const context = createMessageUpdateContext({
+      onAgentEvent,
+      consumePartialReplyDirectives: vi.fn((text: string) => ({ text })),
+      state: {
+        deltaBuffer: "Final answer",
+        blockBuffer: "Final answer",
+        lastStreamedAssistantCleaned: "Final answer",
+        emittedAssistantUpdate: true,
+      },
+    });
+
+    handleMessageUpdate(context, {
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: {
+        type: "text_delta",
+        contentIndex: 0,
+        delta: "Corrected answer",
+        replace: true,
+        partial: {
+          role: "assistant",
+          content: [],
+          stopReason: "stop",
+          api: "ollama",
+          provider: "ollama",
+          model: "qwen3:32b",
+          usage: {},
+          timestamp: 0,
+        },
+      },
+    } as never);
+
+    expect(firstMockArg(onAgentEvent, "agent event")).toEqual({
+      stream: "assistant",
+      data: {
+        text: "Corrected answer",
+        delta: "",
+        replace: true,
+        mediaUrls: undefined,
+        phase: undefined,
+      },
+    });
+    expect(context.state.lastStreamedAssistantCleaned).toBe("Corrected answer");
+    expect(context.state.deltaBuffer).toBe("Corrected answer");
+    expect(context.state.blockBuffer).toBe("Corrected answer");
+  });
+
+  it("resets block parsers before replacement text deltas", () => {
+    const onAgentEvent = vi.fn();
+    const context = createMessageUpdateContext({
+      onAgentEvent,
+      consumePartialReplyDirectives: vi.fn((text: string) => ({ text })),
+      state: {
+        deltaBuffer: "<think>stale",
+        blockBuffer: "stale",
+        blockState: {
+          thinking: true,
+          final: true,
+          inlineCode: createInlineCodeState(),
+          pendingTagFragment: "<thi",
+        },
+        partialBlockState: {
+          thinking: true,
+          final: true,
+          inlineCode: createInlineCodeState(),
+          pendingTagFragment: "<fin",
+        },
+        lastStreamedAssistantCleaned: "stale",
+        emittedAssistantUpdate: true,
+      },
+    });
+
+    handleMessageUpdate(context, {
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: {
+        type: "text_delta",
+        contentIndex: 0,
+        delta: "Corrected answer",
+        replace: true,
+        partial: {
+          role: "assistant",
+          content: [],
+          stopReason: "stop",
+          api: "ollama",
+          provider: "ollama",
+          model: "qwen3:32b",
+          usage: {},
+          timestamp: 0,
+        },
+      },
+    } as never);
+
+    expect(context.state.blockState).toMatchObject({
+      thinking: false,
+      final: false,
+      pendingTagFragment: undefined,
+    });
+    expect(context.state.partialBlockState).toMatchObject({
+      thinking: false,
+      final: false,
+      pendingTagFragment: undefined,
+    });
+    expect(context.state.deltaBuffer).toBe("Corrected answer");
+    expect(context.state.blockBuffer).toBe("Corrected answer");
+  });
+
+  it("emits empty replacement text deltas to clear stale streamed text", () => {
+    const onAgentEvent = vi.fn();
+    const context = createMessageUpdateContext({
+      onAgentEvent,
+      consumePartialReplyDirectives: vi.fn((text: string) => ({ text })),
+      state: {
+        deltaBuffer: "stale",
+        blockBuffer: "stale",
+        lastStreamedAssistantCleaned: "stale",
+        emittedAssistantUpdate: true,
+      },
+    });
+
+    handleMessageUpdate(context, {
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: {
+        type: "text_delta",
+        contentIndex: 0,
+        delta: "",
+        replace: true,
+        partial: {
+          role: "assistant",
+          content: [],
+          stopReason: "stop",
+          api: "ollama",
+          provider: "ollama",
+          model: "qwen3:32b",
+          usage: {},
+          timestamp: 0,
+        },
+      },
+    } as never);
+
+    expect(firstMockArg(onAgentEvent, "agent event")).toEqual({
+      stream: "assistant",
+      data: {
+        text: "",
+        delta: "",
+        replace: true,
+        mediaUrls: undefined,
+        phase: undefined,
+      },
+    });
+    expect(context.state.lastStreamedAssistantCleaned).toBe("");
+    expect(context.state.deltaBuffer).toBe("");
+    expect(context.state.blockBuffer).toBe("");
+  });
+
+  it("resets assistant text stream state before replacement text deltas", () => {
+    const onAgentEvent = vi.fn();
+    const accumulator = createStreamingDirectiveAccumulator();
+    const resetAssistantTextStreamState = vi.fn(() => accumulator.reset());
+    accumulator.consume("\nMEDIA");
+    const context = createMessageUpdateContext({
+      onAgentEvent,
+      consumePartialReplyDirectives: vi.fn((text: string, options?: { final?: boolean }) =>
+        accumulator.consume(text, options),
+      ),
+      resetAssistantTextStreamState,
+      state: {
+        lastStreamedAssistantCleaned: "stale",
+        emittedAssistantUpdate: true,
+      },
+    });
+
+    handleMessageUpdate(context, {
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: {
+        type: "text_delta",
+        contentIndex: 0,
+        delta: "Corrected answer",
+        replace: true,
+        partial: {
+          role: "assistant",
+          content: [],
+          stopReason: "stop",
+          api: "ollama",
+          provider: "ollama",
+          model: "qwen3:32b",
+          usage: {},
+          timestamp: 0,
+        },
+      },
+    } as never);
+
+    expect(resetAssistantTextStreamState).toHaveBeenCalledTimes(1);
+    expect(firstMockArg(onAgentEvent, "agent event")).toMatchObject({
+      data: {
+        text: "Corrected answer",
+        mediaUrls: undefined,
+        replace: true,
+      },
+    });
+  });
+
+  it("emits media-only unphased streaming directives", () => {
+    const onAgentEvent = vi.fn();
+    const context = createMessageUpdateContext({
+      onAgentEvent,
+      consumePartialReplyDirectives: vi.fn(() => ({
+        text: "",
+        mediaUrls: ["/tmp/reply.png"],
+      })),
+    });
+
+    handleMessageUpdate(context, {
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: {
+        type: "text_delta",
+        contentIndex: 0,
+        delta: "<media>",
+        partial: {
+          role: "assistant",
+          content: [],
+          stopReason: "stop",
+          api: "ollama",
+          provider: "ollama",
+          model: "qwen3:32b",
+          usage: {},
+          timestamp: 0,
+        },
+      },
+    } as never);
+
+    expect(firstMockArg(onAgentEvent, "agent event")).toEqual({
+      stream: "assistant",
+      data: {
+        text: "",
+        delta: "",
+        replace: undefined,
+        mediaUrls: ["/tmp/reply.png"],
+        phase: undefined,
+      },
+    });
+  });
+
+  it("accumulates lightweight thinking deltas before emitting reasoning streams", () => {
+    const emitReasoningStream = vi.fn((text: string) => {
+      context.state.lastStreamedReasoning = text;
+    });
+    const context = createMessageUpdateContext({
+      state: { streamReasoning: true },
+    });
+    context.emitReasoningStream = emitReasoningStream;
+
+    for (const delta of ["first", " second"]) {
+      handleMessageUpdate(context, {
+        type: "message_update",
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: {
+          type: "thinking_delta",
+          contentIndex: 0,
+          delta,
+          partial: {
+            role: "assistant",
+            content: [],
+            stopReason: "stop",
+            api: "ollama",
+            provider: "ollama",
+            model: "qwen3:32b",
+            usage: {},
+            timestamp: 0,
+          },
+        },
+      } as never);
+    }
+
+    expect(emitReasoningStream.mock.calls.map(([text]) => text)).toEqual(["first", "first second"]);
+  });
+
   it("treats phased textSignature item changes as assistant-message boundaries", () => {
     const flushBlockReplyBuffer = vi.fn();
     const resetAssistantMessageState = vi.fn();
@@ -788,6 +1137,39 @@ describe("handleMessageEnd", () => {
     expect(onAgentEvent).not.toHaveBeenCalled();
     expect(emitBlockReply).not.toHaveBeenCalled();
     expect(finalizeAssistantTexts).not.toHaveBeenCalled();
+  });
+
+  it("emits final text after an empty replacement cleared the stream", () => {
+    const onAgentEvent = vi.fn();
+    const ctx = createMessageEndContext({
+      onAgentEvent,
+      state: {
+        emittedAssistantUpdate: true,
+        lastStreamedAssistantCleaned: "",
+        deltaBuffer: "",
+        blockBuffer: "",
+      },
+    });
+
+    void handleMessageEnd(ctx, {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Final answer" }],
+        usage: { input: 10, output: 5, total: 15 },
+      },
+    } as never);
+
+    expect(firstMockArg(onAgentEvent, "agent event")).toEqual({
+      stream: "assistant",
+      data: {
+        text: "Final answer",
+        delta: "Final answer",
+        replace: undefined,
+        mediaUrls: undefined,
+        phase: undefined,
+      },
+    });
   });
 
   it("does not duplicate block reply for text_end channels when text was already delivered", () => {

@@ -320,11 +320,23 @@ export interface Context {
  * - `done` carrying the final successful AssistantMessage, or
  * - `error` carrying the final AssistantMessage with stopReason "error" or "aborted"
  *   and errorMessage.
+ *
+ * Delta fields are the source of truth for incremental text, thinking, and tool
+ * argument fragments. `replace` marks text deltas that carry a corrected full
+ * visible text instead of a suffix. `partial` may be a lightweight
+ * compatibility snapshot on delta events; only boundary events and `done`/`error`
+ * guarantee full content.
  */
 export type AssistantMessageEvent =
   | { type: "start"; partial: AssistantMessage }
   | { type: "text_start"; contentIndex: number; partial: AssistantMessage }
-  | { type: "text_delta"; contentIndex: number; delta: string; partial: AssistantMessage }
+  | {
+      type: "text_delta";
+      contentIndex: number;
+      delta: string;
+      replace?: boolean;
+      partial: AssistantMessage;
+    }
   | { type: "text_end"; contentIndex: number; content: string; partial: AssistantMessage }
   | { type: "thinking_start"; contentIndex: number; partial: AssistantMessage }
   | { type: "thinking_delta"; contentIndex: number; delta: string; partial: AssistantMessage }

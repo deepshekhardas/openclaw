@@ -434,6 +434,39 @@ describe("agent event handler", () => {
     nowSpy.mockRestore();
   });
 
+  it("coalesces dense assistant agent deltas without per-chunk broadcasts", () => {
+    let now = 11_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const { broadcast, nodeSendToSession, chatRunState, handler } = createHarness();
+    chatRunState.registry.add("run-agent-dense", {
+      sessionKey: "session-agent-dense",
+      clientRunId: "client-agent-dense",
+    });
+
+    let text = "";
+    for (let i = 0; i < 100; i += 1) {
+      text += "x";
+      now = 11_000 + i;
+      handler({
+        runId: "run-agent-dense",
+        seq: i + 1,
+        stream: "assistant",
+        ts: Date.now(),
+        data: { text, delta: "x" },
+      });
+    }
+
+    const agentCalls = agentBroadcastCalls(broadcast);
+    expect(agentCalls).toHaveLength(1);
+    expect(sessionAgentCalls(nodeSendToSession)).toHaveLength(1);
+    expect(chatBroadcastCalls(broadcast)).toHaveLength(1);
+    expect(sessionChatCalls(nodeSendToSession)).toHaveLength(1);
+    expect((agentCalls[0]?.[1] as { data?: { delta?: string; text?: string } }).data).toMatchObject(
+      { delta: "x", text: "x" },
+    );
+    nowSpy.mockRestore();
+  });
+
   it("flushes coalesced assistant agent text before lifecycle end", () => {
     let now = 20_000;
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -1197,6 +1230,117 @@ describe("agent event handler", () => {
     expect(replacementPayload.message?.content?.[0]?.text).toBe("Hi");
     expect((chatCalls[2]?.[1] as { state?: string }).state).toBe("final");
     expect(sessionChatCalls(nodeSendToSession)).toHaveLength(3);
+    nowSpy.mockRestore();
+  });
+
+  it("honors explicit replacement deltas that shorten to a prefix", () => {
+    let now = 12_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const { broadcast, nodeSendToSession, chatRunState, handler } = createHarness();
+    chatRunState.registry.add("run-prefix-replacement", {
+      sessionKey: "session-prefix-replacement",
+      clientRunId: "client-prefix-replacement",
+    });
+
+    handler({
+      runId: "run-prefix-replacement",
+      seq: 1,
+      stream: "assistant",
+      ts: Date.now(),
+      data: { text: "Hello world" },
+    });
+
+    now = 12_200;
+    handler({
+      runId: "run-prefix-replacement",
+      seq: 2,
+      stream: "assistant",
+      ts: Date.now(),
+      data: { text: "Hello", delta: "", replace: true },
+    });
+
+    const chatCalls = chatBroadcastCalls(broadcast);
+    expect(chatCalls).toHaveLength(2);
+    const replacementPayload = chatCalls[1]?.[1] as {
+      deltaText?: string;
+      replace?: boolean;
+      message?: { content?: Array<{ text?: string }> };
+    };
+    expect(replacementPayload.deltaText).toBe("Hello");
+    expect(replacementPayload.replace).toBe(true);
+    expect(replacementPayload.message?.content?.[0]?.text).toBe("Hello");
+    expect(sessionChatCalls(nodeSendToSession)).toHaveLength(2);
+    nowSpy.mockRestore();
+  });
+
+  it("honors explicit empty replacement deltas", () => {
+    let now = 12_400;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const { broadcast, nodeSendToSession, chatRunState, handler } = createHarness();
+    chatRunState.registry.add("run-empty-replacement", {
+      sessionKey: "session-empty-replacement",
+      clientRunId: "client-empty-replacement",
+    });
+
+    handler({
+      runId: "run-empty-replacement",
+      seq: 1,
+      stream: "assistant",
+      ts: Date.now(),
+      data: { text: "Hello world" },
+    });
+
+    now = 12_450;
+    handler({
+      runId: "run-empty-replacement",
+      seq: 2,
+      stream: "assistant",
+      ts: Date.now(),
+      data: { text: "", delta: "", replace: true },
+    });
+
+    const chatCalls = chatBroadcastCalls(broadcast);
+    expect(chatCalls).toHaveLength(2);
+    const replacementPayload = chatCalls[1]?.[1] as {
+      deltaText?: string;
+      replace?: boolean;
+      message?: { content?: Array<{ text?: string }> };
+    };
+    expect(replacementPayload.deltaText).toBe("");
+    expect(replacementPayload.replace).toBe(true);
+    expect(replacementPayload.message?.content?.[0]?.text).toBe("");
+    expect(sessionChatCalls(nodeSendToSession)).toHaveLength(2);
+    nowSpy.mockRestore();
+  });
+
+  it("suppresses non-empty control lead fragment replacements", () => {
+    let now = 12_500;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const { broadcast, nodeSendToSession, chatRunState, handler } = createHarness();
+    chatRunState.registry.add("run-control-replacement", {
+      sessionKey: "session-control-replacement",
+      clientRunId: "client-control-replacement",
+    });
+
+    handler({
+      runId: "run-control-replacement",
+      seq: 1,
+      stream: "assistant",
+      ts: Date.now(),
+      data: { text: "Hello world" },
+    });
+
+    now = 12_550;
+    handler({
+      runId: "run-control-replacement",
+      seq: 2,
+      stream: "assistant",
+      ts: Date.now(),
+      data: { text: "NO_", delta: "", replace: true },
+    });
+
+    expect(chatBroadcastCalls(broadcast)).toHaveLength(1);
+    expect(sessionChatCalls(nodeSendToSession)).toHaveLength(1);
     nowSpy.mockRestore();
   });
 

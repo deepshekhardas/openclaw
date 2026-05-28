@@ -197,7 +197,11 @@ type BroadcastDelta = { deltaText: string; replace?: true };
 function resolveBroadcastDelta(params: {
   text: string;
   previousBroadcastText: string | undefined;
+  replace?: boolean;
 }): BroadcastDelta | undefined {
+  if (params.replace) {
+    return { deltaText: params.text, replace: true };
+  }
   if (!params.text) {
     return undefined;
   }
@@ -506,7 +510,7 @@ export function createAgentEventHandler({
     seq: number,
     text: string,
     delta?: unknown,
-    opts?: { controlUiVisible?: boolean },
+    opts?: { controlUiVisible?: boolean; replace?: boolean },
   ) => {
     const cleaned = normalizeLiveAssistantEventText({ text, delta });
     const previousRawText = chatRunState.rawBuffers.get(clientRunId) ?? "";
@@ -514,15 +518,18 @@ export function createAgentEventHandler({
       previousText: previousRawText,
       nextText: cleaned.text,
       nextDelta: cleaned.delta,
+      nextReplace: opts?.replace === true,
     });
-    if (!mergedRawText) {
+    if (!mergedRawText && opts?.replace !== true) {
       return;
     }
     chatRunState.rawBuffers.set(clientRunId, mergedRawText);
     const projected = projectLiveAssistantBufferedText(mergedRawText);
     const mergedText = projected.text;
     chatRunState.buffers.set(clientRunId, mergedText);
-    if (projected.suppress) {
+    const shouldEmitSuppressedReplacementClear =
+      opts?.replace === true && mergedText === "" && !projected.pendingLeadFragment;
+    if (projected.suppress && !shouldEmitSuppressedReplacementClear) {
       return;
     }
     if (shouldHideHeartbeatChatOutput(clientRunId, sourceRunId)) {
@@ -530,12 +537,13 @@ export function createAgentEventHandler({
     }
     const now = Date.now();
     const last = chatRunState.deltaSentAt.get(clientRunId) ?? 0;
-    if (now - last < 150) {
+    if (now - last < 150 && opts?.replace !== true) {
       return;
     }
     const broadcastDelta = resolveBroadcastDelta({
       text: mergedText,
       previousBroadcastText: chatRunState.deltaLastBroadcastText.get(clientRunId),
+      replace: opts?.replace === true,
     });
     if (!broadcastDelta) {
       return;
@@ -1060,6 +1068,7 @@ export function createAgentEventHandler({
       ) {
         emitChatDelta(sessionKey, clientRunId, evt.runId, evt.seq, evt.data.text, evt.data.delta, {
           controlUiVisible: isControlUiVisible,
+          replace: evt.data.replace === true,
         });
       }
     }

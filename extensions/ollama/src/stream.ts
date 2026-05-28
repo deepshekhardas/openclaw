@@ -22,6 +22,7 @@ import {
   normalizeProviderId,
 } from "openclaw/plugin-sdk/provider-model-shared";
 import {
+  createAssistantStreamAccumulator,
   createMoonshotThinkingWrapper,
   resolveMoonshotThinkingType,
   streamWithPayloadPatch,
@@ -374,19 +375,22 @@ function resolveOllamaTopLevelParams(
   return Object.keys(requestParams).length > 0 ? requestParams : undefined;
 }
 
-function resolveStreamingTextDelta(previousText: string, nextText: string): string {
+function resolveStreamingTextDelta(
+  previousText: string,
+  nextText: string,
+): { delta: string; replace: boolean } {
   if (!nextText) {
-    return "";
+    return { delta: "", replace: false };
   }
   if (!previousText) {
-    return nextText;
+    return { delta: nextText, replace: false };
   }
   if (nextText.startsWith(previousText)) {
-    return nextText.slice(previousText.length);
+    return { delta: nextText.slice(previousText.length), replace: false };
   }
   // Sanitizers may rewrite previously accumulated content. Fall back to
   // re-emitting the latest complete text so downstream partial state converges.
-  return nextText;
+  return { delta: nextText, replace: true };
 }
 
 export function createConfiguredOllamaCompatStreamWrapper(
@@ -479,6 +483,7 @@ type OllamaUsageFallback = {
 };
 
 const CHARS_PER_TOKEN_ESTIMATE = 4;
+const NDJSON_PARSE_YIELD_INTERVAL = 100;
 
 function buildUsageWithNoCost(params: {
   input?: number;
@@ -1017,11 +1022,28 @@ export function buildAssistantMessage(
   });
 }
 
+async function yieldToEventLoop(): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
 export async function* parseNdjsonStream(
   reader: ReadableStreamDefaultReader<Uint8Array>,
+  options: { yieldEveryLines?: number } = {},
 ): AsyncGenerator<OllamaChatResponse> {
   const decoder = new TextDecoder();
   let buffer = "";
+  let parsedLines = 0;
+  const yieldEveryLines = Math.max(
+    1,
+    Math.floor(options.yieldEveryLines ?? NDJSON_PARSE_YIELD_INTERVAL),
+  );
+
+  const yieldAfterParsedLine = async () => {
+    parsedLines += 1;
+    if (parsedLines % yieldEveryLines === 0) {
+      await yieldToEventLoop();
+    }
+  };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -1039,6 +1061,7 @@ export async function* parseNdjsonStream(
       }
       try {
         yield parseJsonPreservingUnsafeIntegers(trimmed) as OllamaChatResponse;
+        await yieldAfterParsedLine();
       } catch {
         log.warn(`Skipping malformed NDJSON line: ${trimmed.slice(0, 120)}`);
       }
@@ -1048,6 +1071,7 @@ export async function* parseNdjsonStream(
   if (buffer.trim()) {
     try {
       yield parseJsonPreservingUnsafeIntegers(buffer.trim()) as OllamaChatResponse;
+      await yieldAfterParsedLine();
     } catch {
       log.warn(`Skipping malformed trailing data: ${buffer.trim().slice(0, 120)}`);
     }
@@ -1168,6 +1192,15 @@ export function createOllamaStreamFn(
           let pendingFinalVisibleContent: string | undefined;
           const modelInfo = { api: model.api, provider: model.provider, id: model.id };
           const visibleContentSanitizer = createOllamaVisibleContentSanitizer(model.id);
+          const streamAccumulator = createAssistantStreamAccumulator({
+            model: {
+              api: modelInfo.api,
+              provider: modelInfo.provider,
+              model: modelInfo.id,
+            },
+            usage: buildUsageWithNoCost({}),
+            deltaPartialMode: "empty",
+          });
           let streamStarted = false;
           let thinkingStarted = false;
           let thinkingEnded = false;
@@ -1175,37 +1208,12 @@ export function createOllamaStreamFn(
           let textBlockClosed = false;
           const textContentIndex = () => (thinkingStarted ? 1 : 0);
 
-          const buildCurrentContent = (): (TextContent | ThinkingContent | ToolCall)[] => {
-            const parts: (TextContent | ThinkingContent | ToolCall)[] = [];
-            if (accumulatedThinking) {
-              parts.push({
-                type: "thinking",
-                thinking: accumulatedThinking,
-              });
-            }
-            if (accumulatedVisibleContent) {
-              parts.push({ type: "text", text: accumulatedVisibleContent });
-            }
-            return parts;
-          };
-
           const closeThinkingBlock = () => {
             if (!thinkingStarted || thinkingEnded) {
               return;
             }
             thinkingEnded = true;
-            const partial = buildStreamAssistantMessage({
-              model: modelInfo,
-              content: buildCurrentContent(),
-              stopReason: "stop",
-              usage: buildUsageWithNoCost({}),
-            });
-            stream.push({
-              type: "thinking_end",
-              contentIndex: 0,
-              content: accumulatedThinking,
-              partial,
-            });
+            stream.push(streamAccumulator.endThinking(0));
           };
 
           const closeTextBlock = () => {
@@ -1213,18 +1221,7 @@ export function createOllamaStreamFn(
               return;
             }
             textBlockClosed = true;
-            const partial = buildStreamAssistantMessage({
-              model: modelInfo,
-              content: buildCurrentContent(),
-              stopReason: "stop",
-              usage: buildUsageWithNoCost({}),
-            });
-            stream.push({
-              type: "text_end",
-              contentIndex: textContentIndex(),
-              content: accumulatedVisibleContent,
-              partial,
-            });
+            stream.push(streamAccumulator.endText(textContentIndex()));
           };
 
           const flushVisibleText = (nextVisibleContent: string | undefined) => {
@@ -1232,7 +1229,10 @@ export function createOllamaStreamFn(
               return;
             }
             const previousVisibleContent = accumulatedVisibleContent;
-            const delta = resolveStreamingTextDelta(previousVisibleContent, nextVisibleContent);
+            const { delta, replace } = resolveStreamingTextDelta(
+              previousVisibleContent,
+              nextVisibleContent,
+            );
             if (!delta) {
               return;
             }
@@ -1242,38 +1242,15 @@ export function createOllamaStreamFn(
 
             if (!streamStarted) {
               streamStarted = true;
-              const emptyPartial = buildStreamAssistantMessage({
-                model: modelInfo,
-                content: [],
-                stopReason: "stop",
-                usage: buildUsageWithNoCost({}),
-              });
-              stream.push({ type: "start", partial: emptyPartial });
+              stream.push(streamAccumulator.start());
             }
             if (!textBlockStarted) {
               textBlockStarted = true;
-              const partial = buildStreamAssistantMessage({
-                model: modelInfo,
-                content: buildCurrentContent(),
-                stopReason: "stop",
-                usage: buildUsageWithNoCost({}),
-              });
-              stream.push({ type: "text_start", contentIndex: textContentIndex(), partial });
+              stream.push(streamAccumulator.startText(textContentIndex()));
             }
 
             accumulatedVisibleContent = nextVisibleContent;
-            const partial = buildStreamAssistantMessage({
-              model: modelInfo,
-              content: buildCurrentContent(),
-              stopReason: "stop",
-              usage: buildUsageWithNoCost({}),
-            });
-            stream.push({
-              type: "text_delta",
-              contentIndex: textContentIndex(),
-              delta,
-              partial,
-            });
+            stream.push(streamAccumulator.appendTextDelta(textContentIndex(), delta, { replace }));
           };
 
           const resolveVisibleContent = (final: boolean): string | undefined => {
@@ -1292,37 +1269,14 @@ export function createOllamaStreamFn(
             if (thinkingDelta) {
               if (!streamStarted) {
                 streamStarted = true;
-                const emptyPartial = buildStreamAssistantMessage({
-                  model: modelInfo,
-                  content: [],
-                  stopReason: "stop",
-                  usage: buildUsageWithNoCost({}),
-                });
-                stream.push({ type: "start", partial: emptyPartial });
+                stream.push(streamAccumulator.start());
               }
               if (!thinkingStarted) {
                 thinkingStarted = true;
-                const partial = buildStreamAssistantMessage({
-                  model: modelInfo,
-                  content: buildCurrentContent(),
-                  stopReason: "stop",
-                  usage: buildUsageWithNoCost({}),
-                });
-                stream.push({ type: "thinking_start", contentIndex: 0, partial });
+                stream.push(streamAccumulator.startThinking(0));
               }
               accumulatedThinking += thinkingDelta;
-              const partial = buildStreamAssistantMessage({
-                model: modelInfo,
-                content: buildCurrentContent(),
-                stopReason: "stop",
-                usage: buildUsageWithNoCost({}),
-              });
-              stream.push({
-                type: "thinking_delta",
-                contentIndex: 0,
-                delta: thinkingDelta,
-                partial,
-              });
+              stream.push(streamAccumulator.appendThinkingDelta(0, thinkingDelta));
             }
 
             if (chunk.message?.content) {

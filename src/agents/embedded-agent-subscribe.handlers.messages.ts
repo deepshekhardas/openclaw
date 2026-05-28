@@ -161,6 +161,13 @@ function appendBlockReplyChunk(ctx: EmbeddedAgentSubscribeContext, chunk: string
   ctx.state.blockBuffer += chunk;
 }
 
+function resetBlockTagState(state: EmbeddedAgentSubscribeState["blockState"]) {
+  state.thinking = false;
+  state.final = false;
+  state.inlineCode = createInlineCodeState();
+  state.pendingTagFragment = undefined;
+}
+
 function replaceBlockReplyBuffer(ctx: EmbeddedAgentSubscribeContext, text: string) {
   if (ctx.blockChunker) {
     ctx.blockChunker.reset();
@@ -487,7 +494,11 @@ export function handleMessageUpdate(
     if (ctx.state.streamReasoning) {
       // Prefer full partial-message thinking when available; fall back to event payloads.
       const partialThinking = extractAssistantThinking(msg);
-      ctx.emitReasoningStream(partialThinking || thinkingContent || thinkingDelta);
+      const fallbackThinking =
+        evtType === "thinking_delta" && thinkingDelta
+          ? `${ctx.state.lastStreamedReasoning ?? ""}${thinkingDelta}`
+          : thinkingDelta;
+      ctx.emitReasoningStream(partialThinking || thinkingContent || fallbackThinking);
     }
     if (evtType === "thinking_end") {
       if (!ctx.state.reasoningStreamOpen) {
@@ -521,21 +532,23 @@ export function handleMessageUpdate(
     content,
     accumulatedText: ctx.state.deltaBuffer,
   });
+  const isReplacementDelta = evtType === "text_delta" && assistantRecord?.replace === true;
 
   const partialAssistant =
     assistantRecord?.partial && typeof assistantRecord.partial === "object"
       ? (assistantRecord.partial as AssistantMessage)
       : msg;
   const deliveryPhase = resolveAssistantMessagePhase(partialAssistant);
-  const streamItemId = resolveAssistantStreamItemId({
-    contentIndex: assistantRecord?.contentIndex,
-    message: partialAssistant,
-  });
+  const isOpenAiResponsesPartial = isOpenAiResponsesAssistantMessage(partialAssistant);
+  const streamItemId =
+    deliveryPhase || isOpenAiResponsesPartial
+      ? resolveAssistantStreamItemId({
+          contentIndex: assistantRecord?.contentIndex,
+          message: partialAssistant,
+        })
+      : undefined;
   const isPhasePendingOpenAiResponsesTextItem =
-    evtType !== "text_end" &&
-    !deliveryPhase &&
-    Boolean(streamItemId) &&
-    isOpenAiResponsesAssistantMessage(partialAssistant);
+    evtType !== "text_end" && !deliveryPhase && Boolean(streamItemId) && isOpenAiResponsesPartial;
   if ((deliveryPhase || isPhasePendingOpenAiResponsesTextItem) && streamItemId) {
     const previousStreamItemId = ctx.state.lastAssistantStreamItemId;
     if (previousStreamItemId && previousStreamItemId !== streamItemId) {
@@ -551,11 +564,15 @@ export function handleMessageUpdate(
   if (isPhasePendingOpenAiResponsesTextItem) {
     return;
   }
-  const phaseAwareVisibleText = coerceChatContentText(
-    extractAssistantVisibleText(partialAssistant),
-  ).trim();
   const shouldUsePhaseAwareBlockReply = Boolean(deliveryPhase);
+  const phaseAwareVisibleText = shouldUsePhaseAwareBlockReply
+    ? coerceChatContentText(extractAssistantVisibleText(partialAssistant)).trim()
+    : "";
+  const isUnphasedReplacementDelta = isReplacementDelta && !shouldUsePhaseAwareBlockReply;
 
+  if (isUnphasedReplacementDelta) {
+    ctx.resetAssistantTextStreamState();
+  }
   if (chunk) {
     ctx.state.deltaBuffer += chunk;
     if (!shouldUsePhaseAwareBlockReply) {
@@ -567,57 +584,54 @@ export function handleMessageUpdate(
     // Handle partial <think> tags: stream whatever reasoning is visible so far.
     ctx.emitReasoningStream(extractThinkingFromTaggedStream(ctx.state.deltaBuffer));
   }
-  const next =
-    phaseAwareVisibleText ||
-    (deliveryPhase === "final_answer"
-      ? ""
-      : ctx
-          .stripBlockTags(
-            ctx.state.deltaBuffer,
-            {
-              thinking: false,
-              final: false,
-              inlineCode: createInlineCodeState(),
-            },
-            { final: evtType === "text_end" },
-          )
-          .trim());
-  if (next) {
-    const wasThinking = ctx.state.partialBlockState.thinking;
-    const visibleDelta =
-      chunk || evtType === "text_end"
-        ? ctx.stripBlockTags(chunk, ctx.state.partialBlockState, { final: evtType === "text_end" })
-        : "";
-    if (!wasThinking && ctx.state.partialBlockState.thinking) {
-      openReasoningStream(ctx);
-    }
-    // Detect when thinking block ends (</think> tag processed)
-    if (wasThinking && !ctx.state.partialBlockState.thinking) {
-      emitReasoningEnd(ctx);
-    }
-    const parsedDelta = visibleDelta ? ctx.consumePartialReplyDirectives(visibleDelta) : null;
-    const finalParsedDelta =
-      evtType === "text_end" ? ctx.consumePartialReplyDirectives("", { final: true }) : null;
-    const parsedStreamDirectives = mergeReplyDirectiveResults(parsedDelta, finalParsedDelta);
+  const wasThinking = ctx.state.partialBlockState.thinking;
+  const visibleDelta =
+    chunk || evtType === "text_end"
+      ? ctx.stripBlockTags(chunk, ctx.state.partialBlockState, { final: evtType === "text_end" })
+      : "";
+  if (!wasThinking && ctx.state.partialBlockState.thinking) {
+    openReasoningStream(ctx);
+  }
+  // Detect when thinking block ends (</think> tag processed)
+  if (wasThinking && !ctx.state.partialBlockState.thinking) {
+    emitReasoningEnd(ctx);
+  }
+  const parsedDelta = visibleDelta ? ctx.consumePartialReplyDirectives(visibleDelta) : null;
+  const finalParsedDelta =
+    evtType === "text_end" ? ctx.consumePartialReplyDirectives("", { final: true }) : null;
+  const parsedStreamDirectives = mergeReplyDirectiveResults(parsedDelta, finalParsedDelta);
+  const previousCleaned = ctx.state.lastStreamedAssistantCleaned ?? "";
+  const parsedFull = shouldUsePhaseAwareBlockReply
+    ? parseReplyDirectives(splitTrailingDirective(phaseAwareVisibleText).text)
+    : null;
+  const cleanedText = shouldUsePhaseAwareBlockReply
+    ? (parsedFull?.text ?? "")
+    : isUnphasedReplacementDelta
+      ? (parsedStreamDirectives?.text ?? "")
+      : `${previousCleaned}${parsedStreamDirectives?.text ?? ""}`;
+  const next = shouldUsePhaseAwareBlockReply ? phaseAwareVisibleText : cleanedText;
+  const { mediaUrls, hasMedia } = resolveSendableOutboundReplyParts(parsedStreamDirectives ?? {});
+  const hasAudio = Boolean(parsedStreamDirectives?.audioAsVoice);
+  if (next || hasMedia || hasAudio || isUnphasedReplacementDelta) {
     if (shouldUsePhaseAwareBlockReply) {
       recordPendingAssistantReplyDirectives(ctx.state, parsedStreamDirectives);
     }
-    const parsedFull = parseReplyDirectives(splitTrailingDirective(next).text);
-    const cleanedText = parsedFull.text;
-    const { mediaUrls, hasMedia } = resolveSendableOutboundReplyParts(parsedStreamDirectives ?? {});
-    const hasAudio = Boolean(parsedStreamDirectives?.audioAsVoice);
-    const previousCleaned = ctx.state.lastStreamedAssistantCleaned ?? "";
 
     let shouldEmit = false;
     let deltaText = "";
     let replace = false;
-    if (!hasAssistantVisibleReply({ text: cleanedText, mediaUrls, audioAsVoice: hasAudio })) {
+    if (
+      !isUnphasedReplacementDelta &&
+      !hasAssistantVisibleReply({ text: cleanedText, mediaUrls, audioAsVoice: hasAudio })
+    ) {
       shouldEmit = false;
     } else {
-      replace = Boolean(previousCleaned && !cleanedText.startsWith(previousCleaned));
+      replace =
+        isUnphasedReplacementDelta ||
+        Boolean(previousCleaned && !cleanedText.startsWith(previousCleaned));
       deltaText = replace ? "" : cleanedText.slice(previousCleaned.length);
       shouldEmit = replace
-        ? cleanedText !== previousCleaned || hasMedia || hasAudio
+        ? cleanedText !== previousCleaned || hasMedia || hasAudio || isUnphasedReplacementDelta
         : Boolean(deltaText || hasMedia || hasAudio);
     }
 
@@ -752,10 +766,7 @@ export function handleMessageEnd(
     ctx.state.deltaBuffer = "";
     ctx.state.blockBuffer = "";
     ctx.blockChunker?.reset();
-    ctx.state.blockState.thinking = false;
-    ctx.state.blockState.final = false;
-    ctx.state.blockState.inlineCode = createInlineCodeState();
-    ctx.state.blockState.pendingTagFragment = undefined;
+    resetBlockTagState(ctx.state.blockState);
     ctx.state.partialBlockState.pendingTagFragment = undefined;
     ctx.state.lastStreamedAssistant = undefined;
     ctx.state.lastStreamedAssistantCleaned = undefined;
@@ -772,6 +783,9 @@ export function handleMessageEnd(
   const finalStreamDelta = shouldReplaceFinalStream
     ? ""
     : cleanedText.slice(previousStreamedText.length);
+  const shouldEmitFinalDeltaAfterEmptyStream = Boolean(
+    ctx.state.emittedAssistantUpdate && !previousStreamedText && finalStreamDelta,
+  );
 
   if (
     !ctx.params.silentExpected &&
@@ -780,6 +794,7 @@ export function handleMessageEnd(
     (!ctx.state.emittedAssistantUpdate ||
       shouldReplaceFinalStream ||
       didTextChangeWithinCurrentMessage ||
+      shouldEmitFinalDeltaAfterEmptyStream ||
       hasMedia)
   ) {
     const data = buildAssistantStreamData({

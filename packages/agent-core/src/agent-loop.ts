@@ -3,7 +3,13 @@
  * Transforms to Message[] only at the LLM call boundary.
  */
 
-import { type AssistantMessage, type Context, EventStream, type ToolResultMessage } from "./llm.js";
+import {
+  type AssistantMessage,
+  type AssistantMessageEvent,
+  type Context,
+  EventStream,
+  type ToolResultMessage,
+} from "./llm.js";
 import { type AgentCoreStreamRuntimeDeps, resolveAgentCoreStreamFn } from "./runtime-deps.js";
 import type {
   AgentContext,
@@ -27,6 +33,80 @@ const EMPTY_USAGE = {
   totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
+
+function cloneAssistantMessage(message: AssistantMessage): AssistantMessage {
+  return {
+    ...message,
+    content: message.content.map((part) => ({ ...part })),
+  };
+}
+
+function applyTextDelta(
+  message: AssistantMessage,
+  event: Extract<AssistantMessageEvent, { type: "text_delta" }>,
+): AssistantMessage {
+  const next = cloneAssistantMessage(message);
+  const existing = next.content[event.contentIndex];
+  const currentText = existing?.type === "text" ? existing.text : "";
+  next.content[event.contentIndex] = {
+    ...(existing?.type === "text" ? existing : { type: "text" as const }),
+    text: event.replace ? event.delta : `${currentText}${event.delta}`,
+  };
+  return next;
+}
+
+function applyThinkingDelta(
+  message: AssistantMessage,
+  event: Extract<AssistantMessageEvent, { type: "thinking_delta" }>,
+): AssistantMessage {
+  const next = cloneAssistantMessage(message);
+  const existing = next.content[event.contentIndex];
+  const currentThinking = existing?.type === "thinking" ? existing.thinking : "";
+  next.content[event.contentIndex] = {
+    ...(existing?.type === "thinking" ? existing : { type: "thinking" as const }),
+    thinking: `${currentThinking}${event.delta}`,
+  };
+  return next;
+}
+
+function applyToolCallDelta(
+  message: AssistantMessage,
+  event: Extract<AssistantMessageEvent, { type: "toolcall_delta" }>,
+): AssistantMessage {
+  const partialToolCall = event.partial.content[event.contentIndex];
+  if (partialToolCall?.type === "toolCall") {
+    return event.partial;
+  }
+  const existing = message.content[event.contentIndex];
+  return existing?.type === "toolCall" ? cloneAssistantMessage(message) : event.partial;
+}
+
+function resolvePartialAssistantMessage(
+  current: AssistantMessage | null,
+  event: AssistantMessageEvent,
+): AssistantMessage | null {
+  switch (event.type) {
+    case "text_delta":
+      return applyTextDelta(current ?? event.partial, event);
+    case "thinking_delta":
+      return applyThinkingDelta(current ?? event.partial, event);
+    case "toolcall_delta":
+      return applyToolCallDelta(current ?? event.partial, event);
+    case "start":
+    case "text_start":
+    case "text_end":
+    case "thinking_start":
+    case "thinking_end":
+    case "toolcall_start":
+    case "toolcall_end":
+      return event.partial;
+    case "done":
+      return event.message;
+    case "error":
+      return event.error;
+  }
+  return null;
+}
 
 /**
  * Start an agent loop with a new prompt message.
@@ -52,11 +132,13 @@ export function agentLoop(
     signal,
     streamFn,
     runtime,
-  ).then((messages) => {
-    stream.end(messages);
-  }).catch((error) => {
-    pushLoopFailure(stream, config, error, signal?.aborted === true);
-  });
+  )
+    .then((messages) => {
+      stream.end(messages);
+    })
+    .catch((error) => {
+      pushLoopFailure(stream, config, error, signal?.aborted === true);
+    });
 
   return stream;
 }
@@ -95,11 +177,13 @@ export function agentLoopContinue(
     signal,
     streamFn,
     runtime,
-  ).then((messages) => {
-    stream.end(messages);
-  }).catch((error) => {
-    pushLoopFailure(stream, config, error, signal?.aborted === true);
-  });
+  )
+    .then((messages) => {
+      stream.end(messages);
+    })
+    .catch((error) => {
+      pushLoopFailure(stream, config, error, signal?.aborted === true);
+    });
 
   return stream;
 }
@@ -390,7 +474,10 @@ async function streamAssistantResponse(
       case "toolcall_delta":
       case "toolcall_end":
         if (partialMessage) {
-          const message = event.partial;
+          const message = resolvePartialAssistantMessage(partialMessage, event);
+          if (!message) {
+            break;
+          }
           partialMessage = message;
           context.messages[context.messages.length - 1] = message;
           await emit({
