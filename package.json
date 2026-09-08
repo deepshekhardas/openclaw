@@ -1865,13 +1865,13 @@
     "qrcode": "1.5.4",
     "quickjs-wasi": "3.0.0",
     "rastermill": "0.3.0",
-    "tar": "7.5.15",
+    "tar": "7.5.21",
     "tokenjuice": "0.8.0",
     "tree-sitter-bash": "0.25.1",
     "tslog": "4.10.2",
     "typebox": "1.1.38",
     "typescript": "6.0.3",
-    "undici": "8.3.0",
+    "undici": "8.9.0",
     "web-push": "3.6.7",
     "web-tree-sitter": "0.26.9",
     "ws": "8.21.0",
@@ -1897,7 +1897,7 @@
     "@types/ws": "8.18.1",
     "@typescript/native-preview": "7.0.0-dev.20260527.2",
     "@vitest/coverage-v8": "4.1.7",
-    "esbuild": "0.28.0",
+    "esbuild": "0.28.1",
     "jscpd": "4.2.4",
     "jsdom": "29.1.1",
     "lit": "3.3.3",
@@ -1912,7 +1912,7 @@
     "vitest": "4.1.7"
   },
   "optionalDependencies": {
-    "sharp": "0.34.5",
+    "sharp": "0.35.0",
     "sqlite-vec": "0.1.9"
   },
   "overrides": {
